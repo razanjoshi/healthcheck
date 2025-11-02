@@ -20,21 +20,27 @@ def setup_sheets_client():
     try:
         creds = None
 
+        # Debug: Show what we're checking
+        st.write("🔍 Checking credentials sources...")
+        st.write(f"  - GOOGLE_APPLICATION_CREDENTIALS_JSON in env: {'GOOGLE_APPLICATION_CREDENTIALS_JSON' in os.environ}")
+        st.write(f"  - service_account_info in secrets: {'service_account_info' in st.secrets}")
+        st.write(f"  - service-account.json exists: {os.path.exists('service-account.json')}")
+
         # Try 1: Reading from environment variable (Streamlit Cloud)
         if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
             try:
                 creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
                 creds_dict = json.loads(creds_json)
                 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-                st.write("✓ Loaded credentials from environment variable")
+                st.success("✓ Loaded credentials from environment variable")
             except json.JSONDecodeError as e:
                 st.warning(f"Could not parse JSON from env var: {e}")
 
-        # Try 2: Reading from secrets.toml (local development)
+        # Try 2: Reading from secrets.toml (local development or Streamlit Cloud)
         if not creds and "service_account_info" in st.secrets:
             try:
                 creds = Credentials.from_service_account_info(dict(st.secrets["service_account_info"]), scopes=SCOPES)
-                st.write("✓ Loaded credentials from secrets.toml")
+                st.success("✓ Loaded credentials from secrets.toml")
             except Exception as e:
                 st.warning(f"Could not load from secrets: {e}")
 
@@ -42,12 +48,15 @@ def setup_sheets_client():
         if not creds and os.path.exists('service-account.json'):
             try:
                 creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
-                st.write("✓ Loaded credentials from service-account.json")
+                st.success("✓ Loaded credentials from service-account.json")
             except Exception as e:
                 st.warning(f"Could not load from file: {e}")
 
         if not creds:
             st.error("❌ No valid credentials found!")
+            st.error("Please ensure you have set:")
+            st.error("  1. SPREADSHEET_ID in Streamlit secrets")
+            st.error("  2. service_account_info section in Streamlit secrets (TOML format)")
             st.stop()
 
     except Exception as e:
