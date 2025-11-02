@@ -16,14 +16,26 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapi
 @st.cache_resource
 def setup_sheets_client():
     """Initialize Google Sheets client"""
-    creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+    try:
+        # Try reading from secrets (Streamlit Cloud)
+        if "service_account_info" in st.secrets:
+            creds = Credentials.from_service_account_info(st.secrets["service_account_info"], scopes=SCOPES)
+        else:
+            # Fall back to local file
+            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+    except Exception as e:
+        st.error(f"Failed to load credentials: {e}")
+        raise
     return gspread.authorize(creds)
 
 def get_worksheet():
     """Get the Scores worksheet"""
     client = setup_sheets_client()
-    SPREADSHEET_ID = st.secrets.get("SPREADSHEET_ID", "your-spreadsheet-id")
-    sheet = client.open_by_key(SPREADSHEET_ID)
+    spreadsheet_id = st.secrets.get("SPREADSHEET_ID")
+    if not spreadsheet_id:
+        st.error("SPREADSHEET_ID not found in secrets")
+        st.stop()
+    sheet = client.open_by_key(spreadsheet_id)
     return sheet.worksheet('Scores')
 
 def add_score_entry(team_member, scores):
@@ -67,12 +79,12 @@ with st.form("healthcheck_form"):
         placeholder="Enter your name",
         help="Your name will be recorded with your scores"
     )
-    
+
     st.divider()
-    
+
     # Score inputs
     col1, col2 = st.columns(2)
-    
+
     with col1:
         communication = st.slider(
             "Communication 💬",
@@ -95,7 +107,7 @@ with st.form("healthcheck_form"):
             value=3,
             help="How much progress are we making?"
         )
-    
+
     with col2:
         morale = st.slider(
             "Morale 😊",
@@ -111,11 +123,11 @@ with st.form("healthcheck_form"):
             value=3,
             help="Overall team health assessment"
         )
-    
+
     st.divider()
-    
+
     submitted = st.form_submit_button("Submit Healthcheck", use_container_width=True)
-    
+
     if submitted:
         if not team_member:
             st.error("Please enter your name")
@@ -127,7 +139,7 @@ with st.form("healthcheck_form"):
                 'morale': morale,
                 'overall': overall
             }
-            
+
             if add_score_entry(team_member, scores):
                 st.session_state.submitted = True
                 st.success(f"✅ Thank you {team_member}! Your scores have been recorded.", icon="✅")
@@ -142,14 +154,14 @@ st.subheader("📊 Session Summary")
 try:
     worksheet = get_worksheet()
     all_data = worksheet.get_all_values()
-    
+
     if len(all_data) > 1:
         today = datetime.now().strftime('%Y-%m-%d')
         today_entries = [row for row in all_data[1:] if row[0].startswith(today)]
-        
+
         if today_entries:
             st.info(f"✓ {len(today_entries)} team members have submitted today")
-            
+
             # Show average scores
             try:
                 avg_scores = {
@@ -159,7 +171,7 @@ try:
                     'Morale': sum(float(row[5]) for row in today_entries if row[5]) / len(today_entries),
                     'Overall': sum(float(row[6]) for row in today_entries if row[6]) / len(today_entries),
                 }
-                
+
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("💬 Avg Communication", f"{avg_scores['Communication']:.1f}/5")
