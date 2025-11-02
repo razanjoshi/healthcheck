@@ -17,53 +17,43 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapi
 @st.cache_resource
 def setup_sheets_client():
     """Initialize Google Sheets client"""
-    try:
-        creds = None
+    creds = None
 
-        # Debug: Show what we're checking
-        st.write("🔍 Checking credentials sources...")
-        st.write(f"  - GOOGLE_APPLICATION_CREDENTIALS_JSON in env: {'GOOGLE_APPLICATION_CREDENTIALS_JSON' in os.environ}")
-        st.write(f"  - service_account_info in secrets: {'service_account_info' in st.secrets}")
-        st.write(f"  - service-account.json exists: {os.path.exists('service-account.json')}")
-
-        # Try 1: Reading from environment variable (Streamlit Cloud)
-        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
-            try:
-                creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-                creds_dict = json.loads(creds_json)
-                creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-                st.success("✓ Loaded credentials from environment variable")
-            except json.JSONDecodeError as e:
-                st.warning(f"Could not parse JSON from env var: {e}")
-
-        # Try 2: Reading from secrets.toml (local development or Streamlit Cloud)
-        if not creds and "service_account_info" in st.secrets:
-            try:
-                creds = Credentials.from_service_account_info(dict(st.secrets["service_account_info"]), scopes=SCOPES)
-                st.success("✓ Loaded credentials from secrets.toml")
-            except Exception as e:
-                st.warning(f"Could not load from secrets: {e}")
-
-        # Try 3: Fall back to local file
-        if not creds and os.path.exists('service-account.json'):
-            try:
-                creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
-                st.success("✓ Loaded credentials from service-account.json")
-            except Exception as e:
-                st.warning(f"Could not load from file: {e}")
-
-        if not creds:
-            st.error("❌ No valid credentials found!")
-            st.error("Please ensure you have set:")
-            st.error("  1. SPREADSHEET_ID in Streamlit secrets")
-            st.error("  2. service_account_info section in Streamlit secrets (TOML format)")
+    # Try 1: Reading from secrets.toml [service_account_info] section (Streamlit Cloud)
+    if "service_account_info" in st.secrets:
+        try:
+            creds = Credentials.from_service_account_info(dict(st.secrets["service_account_info"]), scopes=SCOPES)
+            return gspread.authorize(creds)
+        except Exception as e:
+            st.error(f"❌ Error loading credentials from secrets: {e}")
             st.stop()
 
-    except Exception as e:
-        st.error(f"❌ Unexpected error loading credentials: {e}")
-        raise
+    # Try 2: Fall back to local file
+    if os.path.exists('service-account.json'):
+        try:
+            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+            return gspread.authorize(creds)
+        except Exception as e:
+            st.error(f"❌ Error loading local credentials: {e}")
+            st.stop()
 
-    return gspread.authorize(creds)
+    # If we get here, no credentials found
+    st.error("❌ No credentials found!")
+    st.error("Please add [service_account_info] section to Streamlit secrets in TOML format:")
+    st.code("""[service_account_info]
+type = "service_account"
+project_id = "your-project"
+private_key_id = "your-key-id"
+private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
+client_email = "your-email@iam.gserviceaccount.com"
+client_id = "your-client-id"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "your-cert-url"
+universe_domain = "googleapis.com"
+""")
+    st.stop()
 
 def get_worksheet():
     """Get the Scores worksheet"""
