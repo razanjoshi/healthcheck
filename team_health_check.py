@@ -3,6 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import json
+import os
 
 # Page config
 st.set_page_config(page_title="Team Healthcheck", layout="centered")
@@ -17,26 +18,61 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapi
 def setup_sheets_client():
     """Initialize Google Sheets client"""
     try:
-        # Try reading from secrets (Streamlit Cloud)
-        if "service_account_info" in st.secrets:
-            creds = Credentials.from_service_account_info(st.secrets["service_account_info"], scopes=SCOPES)
-        else:
-            # Fall back to local file
-            creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+        creds = None
+
+        # Try 1: Reading from environment variable (Streamlit Cloud)
+        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
+            try:
+                creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+                creds_dict = json.loads(creds_json)
+                creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+                st.write("✓ Loaded credentials from environment variable")
+            except json.JSONDecodeError as e:
+                st.warning(f"Could not parse JSON from env var: {e}")
+
+        # Try 2: Reading from secrets.toml (local development)
+        if not creds and "service_account_info" in st.secrets:
+            try:
+                creds = Credentials.from_service_account_info(dict(st.secrets["service_account_info"]), scopes=SCOPES)
+                st.write("✓ Loaded credentials from secrets.toml")
+            except Exception as e:
+                st.warning(f"Could not load from secrets: {e}")
+
+        # Try 3: Fall back to local file
+        if not creds and os.path.exists('service-account.json'):
+            try:
+                creds = Credentials.from_service_account_file('service-account.json', scopes=SCOPES)
+                st.write("✓ Loaded credentials from service-account.json")
+            except Exception as e:
+                st.warning(f"Could not load from file: {e}")
+
+        if not creds:
+            st.error("❌ No valid credentials found!")
+            st.stop()
+
     except Exception as e:
-        st.error(f"Failed to load credentials: {e}")
+        st.error(f"❌ Unexpected error loading credentials: {e}")
         raise
+
     return gspread.authorize(creds)
 
 def get_worksheet():
     """Get the Scores worksheet"""
-    client = setup_sheets_client()
-    spreadsheet_id = st.secrets.get("SPREADSHEET_ID")
-    if not spreadsheet_id:
-        st.error("SPREADSHEET_ID not found in secrets")
+    try:
+        client = setup_sheets_client()
+
+        # Try environment variable first, then secrets
+        spreadsheet_id = os.environ.get("SPREADSHEET_ID") or st.secrets.get("SPREADSHEET_ID")
+
+        if not spreadsheet_id:
+            st.error("❌ SPREADSHEET_ID not found in environment or secrets")
+            st.stop()
+
+        sheet = client.open_by_key(spreadsheet_id)
+        return sheet.worksheet('Scores')
+    except Exception as e:
+        st.error(f"❌ Error connecting to spreadsheet: {e}")
         st.stop()
-    sheet = client.open_by_key(spreadsheet_id)
-    return sheet.worksheet('Scores')
 
 def add_score_entry(team_member, scores):
     """Add score entry to Google Sheets"""
@@ -147,7 +183,7 @@ with st.form("healthcheck_form"):
             else:
                 st.error("Failed to submit. Please try again.")
 
-# Display current session summary (optional)
+# Display current session summary
 st.divider()
 st.subheader("📊 Session Summary")
 
@@ -183,9 +219,11 @@ try:
                     st.metric("😊 Avg Morale", f"{avg_scores['Morale']:.1f}/5")
                 with col5:
                     st.metric("❤️ Avg Overall", f"{avg_scores['Overall']:.1f}/5")
-            except:
-                pass
+            except Exception as avg_error:
+                st.warning(f"Could not calculate averages: {avg_error}")
         else:
             st.info("No submissions today yet")
+    else:
+        st.info("Sheet is empty. Be the first to submit!")
 except Exception as e:
     st.warning(f"Could not load summary: {e}")
