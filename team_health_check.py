@@ -5,14 +5,28 @@ from datetime import datetime
 import json
 import os
 
-# Page config
-st.set_page_config(page_title="Team Healthcheck", layout="centered")
+st.set_page_config(page_title="Booking Guild Team Health", layout="centered")
 
-# Initialize session state
 if 'submitted' not in st.session_state:
     st.session_state.submitted = False
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+
+RESPONSE_SCORES = {
+    "Strongly disagree": 1,
+    "Disagree": 2,
+    "Neutral": 3,
+    "Agree": 4,
+    "Strongly agree": 5
+}
+
+MANAGER_SCORES = {
+    "Too directive": 1,
+    "Just right": 3,
+    "Too hands off": 5
+}
+
+TEAM_OPTIONS = ["Flights", "Hotels"]
 
 @st.cache_resource
 def setup_sheets_client():
@@ -37,30 +51,13 @@ def setup_sheets_client():
             st.error(f"❌ Error loading local credentials: {e}")
             st.stop()
 
-    # If we get here, no credentials found
     st.error("❌ No credentials found!")
-    st.error("Please add [service_account_info] section to Streamlit secrets in TOML format:")
-    st.code("""[service_account_info]
-type = "service_account"
-project_id = "your-project"
-private_key_id = "your-key-id"
-private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
-client_email = "your-email@iam.gserviceaccount.com"
-client_id = "your-client-id"
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "your-cert-url"
-universe_domain = "googleapis.com"
-""")
     st.stop()
 
 def get_worksheet():
     """Get the Scores worksheet"""
     try:
         client = setup_sheets_client()
-
-        # Try environment variable first, then secrets
         spreadsheet_id = os.environ.get("SPREADSHEET_ID") or st.secrets.get("SPREADSHEET_ID")
 
         if not spreadsheet_id:
@@ -73,19 +70,24 @@ def get_worksheet():
         st.error(f"❌ Error connecting to spreadsheet: {e}")
         st.stop()
 
-def add_score_entry(team_member, scores):
+def add_score_entry(responses):
     """Add score entry to Google Sheets"""
     try:
         worksheet = get_worksheet()
         date = datetime.now().strftime('%Y-%m-%d %H:%M')
+        
         row = [
             date,
-            team_member,
-            scores['communication'],
-            scores['collaboration'],
-            scores['progress'],
-            scores['morale'],
-            scores['overall']
+            RESPONSE_SCORES.get(responses['risk_taking'], 0),
+            RESPONSE_SCORES.get(responses['team_dependence'], 0),
+            RESPONSE_SCORES.get(responses['goals_understanding'], 0),
+            RESPONSE_SCORES.get(responses['work_meaning'], 0),
+            RESPONSE_SCORES.get(responses['work_impact'], 0),
+            RESPONSE_SCORES.get(responses['motivation'], 0),
+            RESPONSE_SCORES.get(responses['product_direction'], 0),
+            MANAGER_SCORES.get(responses['manager_approach'], 0),
+            RESPONSE_SCORES.get(responses['recommend'], 0),
+            responses['team']
         ]
         worksheet.append_row(row)
         return True
@@ -97,92 +99,167 @@ def initialize_headers():
     """Initialize sheet headers if needed"""
     try:
         worksheet = get_worksheet()
-        if worksheet.cell(1, 1).value is None:
-            headers = ['Date', 'Team Member', 'Communication', 'Collaboration', 'Progress', 'Morale', 'Overall']
+        if worksheet.cell(1, 1).value != 'Date':
+            headers = [
+                'Date',
+                'Risk Taking (1-5)',
+                'Team Dependence (1-5)',
+                'Goals Understanding (1-5)',
+                'Work Meaning (1-5)',
+                'Work Impact (1-5)',
+                'Motivation (1-5)',
+                'Product Direction (1-5)',
+                'Manager Approach (1-5)',
+                'Recommend (1-5)',
+                'Team'
+            ]
             worksheet.insert_row(headers, 1)
+            st.info("✓ Headers initialized")
     except Exception as e:
         st.warning(f"Could not initialize headers: {e}")
 
+initialize_headers()
+
 # UI
-st.title("🏥 Team Healthcheck Meeting")
-st.markdown("Please rate how you're feeling across these dimensions (1-5 scale)")
+st.title("🏥 Booking Guild Team Health Check")
+
+col1, col2 = st.columns([0.8, 0.2])
+with col1:
+    st.markdown("Please rate your experience across these dimensions. All responses are confidential.")
+with col2:
+    st.page_link("pages/analytics.py", label="📊 View Analytics", icon="📊")
 
 with st.form("healthcheck_form"):
-    # Team member name
-    team_member = st.text_input(
-        "Your Name",
-        placeholder="Enter your name",
-        help="Your name will be recorded with your scores"
+    
+    st.markdown("### Your Team")
+    
+    team = st.radio(
+        "Are you part of:",
+        options=TEAM_OPTIONS,
+        label_visibility="collapsed",
+        key="q_team"
     )
-
+    
     st.divider()
-
-    # Score inputs
-    col1, col2 = st.columns(2)
-
-    with col1:
-        communication = st.slider(
-            "Communication 💬",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="How well are we communicating as a team?"
-        )
-        collaboration = st.slider(
-            "Collaboration 🤝",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="How well are we working together?"
-        )
-        progress = st.slider(
-            "Progress 📈",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="How much progress are we making?"
-        )
-
-    with col2:
-        morale = st.slider(
-            "Morale 😊",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="How is team morale?"
-        )
-        overall = st.slider(
-            "Overall Health ❤️",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="Overall team health assessment"
-        )
-
+    
+    st.markdown("### Your Responses")
+    st.markdown("*Rate each statement from Strongly disagree to Strongly agree*")
+    
     st.divider()
-
-    submitted = st.form_submit_button("Submit Healthcheck", use_container_width=True)
-
+    
+    st.markdown("**1. I feel I can take risks and make mistakes.**")
+    risk_taking = st.radio(
+        "Risk Taking",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q1"
+    )
+    
+    st.divider()
+    
+    st.markdown("**2. I can depend upon my team members.**")
+    team_dependence = st.radio(
+        "Team Dependence",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q2"
+    )
+    
+    st.divider()
+    
+    st.markdown("**3. I understand the goals of the company, the team, and how my role helps achieve them.**")
+    goals_understanding = st.radio(
+        "Goals Understanding",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q3"
+    )
+    
+    st.divider()
+    
+    st.markdown("**4. I find meaning in the work I do.**")
+    work_meaning = st.radio(
+        "Work Meaning",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q4"
+    )
+    
+    st.divider()
+    
+    st.markdown("**5. I believe the work I'm doing makes an impact to the company.**")
+    work_impact = st.radio(
+        "Work Impact",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q5"
+    )
+    
+    st.divider()
+    
+    st.markdown("**6. I'm motivated.**")
+    motivation = st.radio(
+        "Motivation",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q6"
+    )
+    
+    st.divider()
+    
+    st.markdown("**7. I'm getting the product direction I need.**")
+    product_direction = st.radio(
+        "Product Direction",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q7"
+    )
+    
+    st.divider()
+    
+    st.markdown("**8. I find my engineering manager's approach to be:**")
+    manager_approach = st.radio(
+        "Manager Approach",
+        options=["Too directive", "Just right", "Too hands off"],
+        label_visibility="collapsed",
+        key="q8"
+    )
+    
+    st.divider()
+    
+    st.markdown("**9. I'd recommend working in the Bookings Guild to my network**")
+    recommend = st.radio(
+        "Recommend",
+        options=["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+        label_visibility="collapsed",
+        key="q9"
+    )
+    
+    st.divider()
+    
+    submitted = st.form_submit_button("✅ Submit Health Check", use_container_width=True)
+    
     if submitted:
-        if not team_member:
-            st.error("Please enter your name")
+        responses = {
+            'risk_taking': risk_taking,
+            'team_dependence': team_dependence,
+            'goals_understanding': goals_understanding,
+            'work_meaning': work_meaning,
+            'work_impact': work_impact,
+            'motivation': motivation,
+            'product_direction': product_direction,
+            'manager_approach': manager_approach,
+            'recommend': recommend,
+            'team': team
+        }
+        
+        if add_score_entry(responses):
+            st.session_state.submitted = True
+            st.success("✅ Thank you! Your response has been recorded.", icon="✅")
+            st.balloons()
         else:
-            scores = {
-                'communication': communication,
-                'collaboration': collaboration,
-                'progress': progress,
-                'morale': morale,
-                'overall': overall
-            }
+            st.error("Failed to submit. Please try again.")
 
-            if add_score_entry(team_member, scores):
-                st.session_state.submitted = True
-                st.success(f"✅ Thank you {team_member}! Your scores have been recorded.", icon="✅")
-                st.balloons()
-            else:
-                st.error("Failed to submit. Please try again.")
-
-# Display current session summary
 st.divider()
 st.subheader("📊 Session Summary")
 
@@ -197,31 +274,45 @@ try:
         if today_entries:
             st.info(f"✓ {len(today_entries)} team members have submitted today")
 
-            # Show average scores
+            # Calculate and display average scores
             try:
-                avg_scores = {
-                    'Communication': sum(float(row[2]) for row in today_entries if row[2]) / len(today_entries),
-                    'Collaboration': sum(float(row[3]) for row in today_entries if row[3]) / len(today_entries),
-                    'Progress': sum(float(row[4]) for row in today_entries if row[4]) / len(today_entries),
-                    'Morale': sum(float(row[5]) for row in today_entries if row[5]) / len(today_entries),
-                    'Overall': sum(float(row[6]) for row in today_entries if row[6]) / len(today_entries),
+                categories = {
+                    '💬 Risk Taking': 1,
+                    '🤝 Team Dependence': 2,
+                    '🎯 Goals Understanding': 3,
+                    '✨ Work Meaning': 4,
+                    '📊 Work Impact': 5,
+                    '⚡ Motivation': 6,
+                    '🧭 Product Direction': 7,
+                    '❤️ Recommend': 9
                 }
+                
+                avg_scores = {}
+                for label, col_index in categories.items():
+                    scores = [float(row[col_index]) for row in today_entries if col_index < len(row) and row[col_index]]
+                    if scores:
+                        avg_scores[label] = sum(scores) / len(scores)
 
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("💬 Avg Communication", f"{avg_scores['Communication']:.1f}/5")
-                with col2:
-                    st.metric("🤝 Avg Collaboration", f"{avg_scores['Collaboration']:.1f}/5")
-                with col3:
-                    st.metric("📈 Avg Progress", f"{avg_scores['Progress']:.1f}/5")
-                with col4:
-                    st.metric("😊 Avg Morale", f"{avg_scores['Morale']:.1f}/5")
-                with col5:
-                    st.metric("❤️ Avg Overall", f"{avg_scores['Overall']:.1f}/5")
+                # Display in 2 columns
+                cols = st.columns(2)
+                for idx, (label, score) in enumerate(avg_scores.items()):
+                    with cols[idx % 2]:
+                        st.metric(label, f"{score:.1f}/5")
+                
+                # Team breakdown
+                st.markdown("**Team Breakdown:**")
+                team_counts = {}
+                for row in today_entries:
+                    team = row[-1] if row[-1] else "Unknown"
+                    team_counts[team] = team_counts.get(team, 0) + 1
+                
+                for team, count in team_counts.items():
+                    st.write(f"- {team}: {count} submission(s)")
+                    
             except Exception as avg_error:
                 st.warning(f"Could not calculate averages: {avg_error}")
         else:
-            st.info("No submissions today yet")
+            st.info("No submissions today yet. Be the first to share your feedback!")
     else:
         st.info("Sheet is empty. Be the first to submit!")
 except Exception as e:
